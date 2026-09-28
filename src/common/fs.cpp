@@ -1,4 +1,6 @@
 #include "fs.h"
+#include <sys/fcntl.h>
+#include <sys/mman.h>
 
 #if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
 #define S_ISREG(m) (((m)&S_IFMT) == S_IFREG)
@@ -58,7 +60,11 @@ void* ZFile::MapFile(const char* path, size_t offset, size_t size, size_t* psize
 		if (MAP_FAILED == base) {
 			base = NULL;
 		}
-		close(fd);
+#ifdef __EMSCRIPTEN__
+		s_mapFiles[base] = reinterpret_cast<void*>(static_cast<uintptr_t>(fd));
+#else
+        close(fd);
+#endif
 	}
 
 #endif
@@ -78,6 +84,18 @@ bool ZFile::UnmapFile(void* base, size_t size)
 	}
 	return false;
 #else
+
+#ifdef __EMSCRIPTEN__
+    auto it = s_mapFiles.find(base);
+    if (it != s_mapFiles.end()) {
+        int fd = static_cast<int>(reinterpret_cast<uintptr_t>(it->second));
+        int flags = fcntl(fd, F_GETFL);
+        if ((flags & O_ACCMODE) == O_RDWR)
+            pwrite(fd, base, size, 0);
+	    close(fd);
+	    s_mapFiles.erase(it);
+    }
+#endif
 	return (0 == munmap(base, size));
 #endif
 }
@@ -329,7 +347,7 @@ bool ZFile::CopyFile(const char* szSrcFile, const char* szDestFile)
 {
 #ifdef _WIN32
 	return ::CopyFileA(szSrcFile, szDestFile, FALSE) ? true : false;
-#else 
+#else
 
 	int src_id = -1;
 	int dest_fd = -1;
@@ -512,7 +530,7 @@ bool ZFile::EnumFolder(const char* szFolder, bool bRecursive, enum_folder_callba
 	if (NULL == dir) {
 		return false;
 	}
-	
+
 	dirent* ptr = readdir(dir);
 	while (NULL != ptr) {
 		if (0 == strcmp(ptr->d_name, ".") || 0 == strcmp(ptr->d_name, "..")) {
