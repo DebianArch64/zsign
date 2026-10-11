@@ -1,5 +1,6 @@
 #include "bundle.h"
 #include "common.h"
+#include "log.h"
 #include "macho.h"
 #include "sys/stat.h"
 #include "sys/types.h"
@@ -86,7 +87,7 @@ bool ZBundle::GetSignFolderInfo(const string& strFolder, jvalue& jvNode, bool bG
 bool ZBundle::GetObjectsToSign(const string& strFolder, jvalue& jvInfo)
 {
 	vector<string> allBundles;
-	
+
 	std::function<void(const string&)> findAllBundles = [&](const string& currentPath) {
 		ZFile::EnumFolder(currentPath.c_str(), false, NULL, [&](bool bFolder, const string& strPath) {
 			if (bFolder) {
@@ -103,23 +104,23 @@ bool ZBundle::GetObjectsToSign(const string& strFolder, jvalue& jvInfo)
 			return false;
 		});
 	};
-	
+
 	findAllBundles(strFolder);
-	
+
 	sort(allBundles.begin(), allBundles.end(), [](const string& a, const string& b) {
 		size_t depthA = count(a.begin(), a.end(), '/');
 		size_t depthB = count(b.begin(), b.end(), '/');
 		// deeper paths first
 		return depthA > depthB;
 	});
-	
+
 	for (const string& bundlePath : allBundles) {
 		jvalue jvNode;
 		if (GetSignFolderInfo(bundlePath, jvNode)) {
 			jvInfo["folders"].push_back(jvNode);
 		}
 	}
-	
+
 	ZFile::EnumFolder(strFolder.c_str(), true, NULL, [&](bool bFolder, const string& strPath) {
 		if (bFolder || string::npos != strPath.find(".dSYM") ||
 			string::npos != strPath.find("_WatchKitStub")) {
@@ -175,7 +176,7 @@ bool ZBundle::GenerateCodeResources(const string& strFolder, jvalue& jvCodeRes)
 
 	setFiles.erase("_CodeSignature/CodeResources");
 	setFiles.erase(strBundleExe);
-	
+
 	jvCodeRes.clear();
 	jvCodeRes["files"] = jvalue(jvalue::E_OBJECT);
 	jvCodeRes["files2"] = jvalue(jvalue::E_OBJECT);
@@ -306,8 +307,12 @@ static bool IsAppExtensionPath(const string& strPath)
 	return (0 == strPath.rfind("PlugIns/", 0) || 0 == strPath.rfind("Extensions/", 0));
 }
 
-bool ZBundle::SignNode(jvalue& jvNode)
+bool ZBundle::SignNode(jvalue& jvNode, const function<void (const double&)>& percent)
 {
+    size_t numFolders = jvNode["folders"].size();
+    size_t numFiles = jvNode["files"].size();
+    double totalResources = static_cast<double>(numFolders + numFiles + 1);
+    double leftOver = 0;
 	if (jvNode.has("files")) {
 		for (size_t i = 0; i < jvNode["files"].size(); i++) {
 			string strFile = jvNode["files"][i];
@@ -322,10 +327,12 @@ bool ZBundle::SignNode(jvalue& jvNode)
 			}
 		}
 	}
-	
+
 	if (jvNode.has("folders")) {
 		for (size_t i = 0; i < jvNode["folders"].size(); i++) {
-			if (!SignNode(jvNode["folders"][i])) {
+			if (!SignNode(jvNode["folders"][i], [&](const double &prog) {
+			    if (percent) percent(leftOver += (prog / numFolders));
+			})) {
 				return false;
 			}
 		}
@@ -784,7 +791,8 @@ bool ZBundle::SignFolder(ZSignAsset* pSignAsset,
 							bool bForce,
 							bool bWeakInject,
 							bool bEnableCache,
-							bool bRemoveProvision)
+							bool bRemoveProvision,
+							const function<void (const double&)>& percent)
 {
 	m_bForceSign = bForce;
 	m_pSignAsset = pSignAsset;
@@ -879,7 +887,7 @@ bool ZBundle::SignFolder(ZSignAsset* pSignAsset,
 	ZLog::PrintV(">>> SubjectCN: \t%s\n", m_pSignAsset->m_strSubjectCN.c_str());
 	ZLog::PrintV(">>> ReadCache: \t%s\n", m_bForceSign ? "NO" : "YES");
 
-	if (SignNode(jvRoot)) {
+	if (SignNode(jvRoot, percent)) {
 		if (bEnableCache) {
 			ZFile::CreateFolder("./.zsign_cache");
 			jvRoot.style_write_to_file("./.zsign_cache/%s.json", strCacheName.c_str());
@@ -900,8 +908,9 @@ bool ZBundle::SignFolder(list<ZSignAsset>* pSignAssets,
 						bool bForce,
 						bool bWeakInject,
 						bool bEnableCache,
-						bool bRemoveProvision)
+						bool bRemoveProvision,
+						const function<void (const double&)>& percent)
 {
 	m_pSignAssets = pSignAssets;
-	return SignFolder(&m_pSignAssets->front(), strFolder, strBundleId, strBundleVersion, strDisplayName, arrInjectDylibs, arrRemoveDylibNames, bForce, bWeakInject, bEnableCache, bRemoveProvision);
+	return SignFolder(&m_pSignAssets->front(), strFolder, strBundleId, strBundleVersion, strDisplayName, arrInjectDylibs, arrRemoveDylibNames, bForce, bWeakInject, bEnableCache, bRemoveProvision, percent);
 }

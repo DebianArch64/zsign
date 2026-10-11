@@ -2,6 +2,8 @@
 #include "common.h"
 #include "json.h"
 #include "openssl.h"
+#include <cstddef>
+#include <functional>
 #include <vector>
 #include <list>
 #include <set>
@@ -22,7 +24,8 @@ public:
 					bool bForce,
 					bool bWeakInject,
 					bool bEnableCache,
-					bool bRemoveProvision = false);
+					bool bRemoveProvision = false,
+                    const function<void (const double&)>& percent = nullptr);
 
 	bool SignFolder(list<ZSignAsset>* pSignAssets,
 					const string& strFolder,
@@ -34,10 +37,11 @@ public:
 					bool bForce,
 					bool bWeakInject,
 					bool bEnableCache,
-					bool bRemoveProvision = false);
+					bool bRemoveProvision = false,
+                    const function<void (const double&)>& percent = nullptr);
 
 private:
-	bool SignNode(jvalue& jvNode);
+	bool SignNode(jvalue& jvNode, const function<void (const double&)>& percent = nullptr);
 	void GetNodeChangedFiles(jvalue& jvNode);
 	void GetChangedFiles(jvalue& jvNode, vector<string>& arrChangedFiles);
 	bool ModifyPluginsBundleId(const string& strOldBundleId, const string& strNewBundleId);
